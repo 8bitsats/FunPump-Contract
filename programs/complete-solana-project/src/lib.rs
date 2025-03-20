@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
-use std::convert::TryInto;
+use anchor_spl::token::{self, Mint, Token, TokenAccount};
 
-declare_id!("YourProgramID");
+// Use a proper base58 program ID (32 bytes)
+declare_id!("CSo12JKLUbvYyXunq3gXQhsqcQAx3eiqGWy4zZX1CnB");
 
 #[program]
 pub mod complete_solana_project {
@@ -19,7 +19,14 @@ pub mod complete_solana_project {
         let current_time = Clock::get()?.unix_timestamp;
         let unlock_time = current_time + lock_duration;
 
-        token::transfer(ctx.accounts.into_transfer_to_vault_context(), amount)?;
+        let cpi_accounts = token::Transfer {
+            from: ctx.accounts.user_token_account.to_account_info(),
+            to: ctx.accounts.vault_token_account.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+        token::transfer(cpi_ctx, amount)?;
 
         ctx.accounts.vault.locked_until = unlock_time;
         ctx.accounts.vault.locked_amount = amount;
@@ -29,12 +36,28 @@ pub mod complete_solana_project {
 
     pub fn unlock_tokens(ctx: Context<UnlockTokens>) -> Result<()> {
         let current_time = Clock::get()?.unix_timestamp;
-        let vault = &mut ctx.accounts.vault;
+        let vault = &ctx.accounts.vault;
 
         require!(current_time >= vault.locked_until, CustomError::TokensStillLocked);
 
-        token::transfer(ctx.accounts.into_transfer_from_vault_context(), vault.locked_amount)?;
+        // Store the amount and bump before mutating anything
+        let amount = vault.locked_amount;
+        let bump = vault.bump;
+        let vault_authority = ctx.accounts.vault.to_account_info();
+        
+        let cpi_accounts = token::Transfer {
+            from: ctx.accounts.vault_token_account.to_account_info(),
+            to: ctx.accounts.user_token_account.to_account_info(),
+            authority: vault_authority,
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let seeds = &[b"vault", ctx.accounts.authority.key.as_ref(), &[bump]];
+        let signer = &[&seeds[..]];
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+        token::transfer(cpi_ctx, amount)?;
 
+        // Now mutate the vault
+        let vault = &mut ctx.accounts.vault;
         vault.locked_amount = 0;
         Ok(())
     }
@@ -141,7 +164,15 @@ pub mod complete_solana_project {
         let vesting = &mut ctx.accounts.vesting;
         require!(amount == vesting.amount, CustomError::InvalidVestingAmount);
 
-        token::transfer(ctx.accounts.into_transfer_to_vesting_context(), amount)?;
+        // Create the transfer context directly
+        let cpi_accounts = token::Transfer {
+            from: ctx.accounts.owner_token_account.to_account_info(),
+            to: ctx.accounts.vesting_token_account.to_account_info(),
+            authority: ctx.accounts.owner.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+        token::transfer(cpi_ctx, amount)?;
 
         Ok(())
     }
@@ -354,39 +385,6 @@ pub enum CustomError {
     VestingPeriodNotEnded,
     #[msg("Market cap target not reached")]
     MarketCapNotReached,
-}
-
-impl<'info> LockTokens<'info> {
-    fn into_transfer_to_vault_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
-        let cpi_accounts = Transfer {
-            from: self.user_token_account.to_account_info().clone(),
-            to: self.vault_token_account.to_account_info().clone(),
-            authority: self.authority.to_account_info().clone(),
-        };
-        CpiContext::new(self.token_program.to_account_info().clone(), cpi_accounts)
-    }
-}
-
-impl<'info> UnlockTokens<'info> {
-    fn into_transfer_from_vault_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
-        let cpi_accounts = Transfer {
-            from: self.vault_token_account.to_account_info().clone(),
-            to: self.user_token_account.to_account_info().clone(),
-            authority: self.vault.to_account_info().clone(),
-        };
-        CpiContext::new(self.token_program.to_account_info().clone(), cpi_accounts)
-    }
-}
-
-impl<'info> LockTokensForVesting<'info> {
-    fn into_transfer_to_vesting_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
-        let cpi_accounts = Transfer {
-            from: self.owner_token_account.to_account_info().clone(),
-            to: self.vesting_token_account.to_account_info().clone(),
-            authority: self.owner.to_account_info().clone(),
-        };
-        CpiContext::new(self.token_program.to_account_info().clone(), cpi_accounts)
-    }
 }
 
 fn calculate_tokens_out(curve: &Curve, sol_amount: u64) -> Result<u64> {
