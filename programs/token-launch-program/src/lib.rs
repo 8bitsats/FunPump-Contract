@@ -1,14 +1,18 @@
-// voice_ai_launchpad.rs
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount};
-use solana_program::clock::UnixTimestamp;
+use anchor_spl::associated_token::AssociatedToken;
+use solana_program::program::invoke;
 
-// Import the new modules
-use crate::state::{EnhancedBondingCurve, Vesting};
-use crate::instructions::voice_launch::{self, *};
-use crate::utils::pumpfun_integration::{PUMPFUN_PROGRAM_ID, MPL_TOKEN_METADATA_PROGRAM_ID};
+// Declare the modules
+mod state;
+mod instructions;
+mod utils;
 
-declare_id!("VoiceLaunch11111111111111111111111111111111");
+use state::{EnhancedBondingCurve, Vesting as StateVesting};
+use instructions::voice_launch;
+use utils::pumpfun_integration::{PUMPFUN_PROGRAM_ID, MPL_TOKEN_METADATA_PROGRAM_ID};
+
+declare_id!("funvWGBmpr8N7pTNqpxkWPgWnQbL3Yr5vzCHNJT2YkL");
 
 const MINIMUM_VESTING_PERIOD: i64 = 24 * 60 * 60; // 1 day
 const MAXIMUM_VESTING_PERIOD: i64 = 365 * 24 * 60 * 60; // 1 year
@@ -71,6 +75,7 @@ pub mod voice_ai_launchpad {
         );
 
         let clock = Clock::get()?;
+        let vault_key = ctx.accounts.vault.key();
         let vault = &mut ctx.accounts.vault;
         vault.locked_amount = amount;
         vault.locked_until = clock.unix_timestamp + lock_duration;
@@ -88,7 +93,7 @@ pub mod voice_ai_launchpad {
         )?;
 
         emit!(TokensLocked {
-            vault: ctx.accounts.vault.key(),
+            vault: vault_key,
             amount,
             locked_until: vault.locked_until
         });
@@ -163,44 +168,90 @@ pub mod voice_ai_launchpad {
         ctx: Context<UnlockVestedTokens>,
         current_market_cap: u64
     ) -> Result<()> {
+        let current_time = Clock::get()?.unix_timestamp;
+        let vesting_key = ctx.accounts.vesting.key();
+        let vesting_authority = ctx.accounts.vesting.to_account_info();
         let vesting = &mut ctx.accounts.vesting;
-        let clock = Clock::get()?;
         
         require!(vesting.is_locked, LaunchpadError::NotLocked);
-        require!(clock.unix_timestamp >= vesting.end_time, LaunchpadError::VestingNotComplete);
+        require!(current_time >= vesting.end_time, LaunchpadError::VestingNotComplete);
         require!(
             current_market_cap >= vesting.target_market_cap,
             LaunchpadError::MarketCapNotReached
         );
 
-        let seeds = &[
-            b"vesting",
-            vesting.token_mint.as_ref(),
-            vesting.owner.as_ref(),
-            &[vesting.bump],
-        ];
-        let signer = &[&seeds[..]];
-
+        let amount = vesting.amount;
+        let bump = vesting.bump;
+        
         token::transfer(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
                 token::Transfer {
                     from: ctx.accounts.vesting_token_account.to_account_info(),
                     to: ctx.accounts.owner_token_account.to_account_info(),
-                    authority: ctx.accounts.vesting.to_account_info(),
+                    authority: vesting_authority,
                 },
-                signer,
+                &[&[
+                    b"vesting", 
+                    ctx.accounts.owner.key().as_ref(),
+                    &[bump],
+                ]],
             ),
-            vesting.amount,
+            amount,
         )?;
-
-        vesting.is_locked = false;
-
-        emit!(TokensUnlocked {
-            vesting: ctx.accounts.vesting.key(),
-            amount: vesting.amount,
-            market_cap: current_market_cap
+        
+        // Create a record of the unlock
+        emit!(VestingUnlockEvent {
+            vesting: vesting_key,
+            amount,
+            unlock_time: current_time,
+            market_cap: current_market_cap,
         });
+        
+        vesting.is_locked = false;
+        Ok(())
+    }
+
+    // Unlock tokens
+    pub fn unlock_tokens(ctx: Context<UnlockTokens>) -> Result<()> {
+        let current_time = Clock::get()?.unix_timestamp;
+        let vault_key = ctx.accounts.vault.key();
+        let vault_authority = ctx.accounts.vault.to_account_info();
+        let vault = &mut ctx.accounts.vault;
+        
+        require!(current_time >= vault.locked_until, LaunchpadError::LockPeriodNotEnded);
+        
+        // Store values before using the mutable reference
+        let amount = vault.locked_amount;
+        let locked_until = vault.locked_until;
+        let bump = vault.bump;
+        
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.vault_token_account.to_account_info(),
+                    to: ctx.accounts.owner_token_account.to_account_info(),
+                    authority: vault_authority,
+                },
+                &[&[
+                    b"vault",
+                    ctx.accounts.owner.key().as_ref(),
+                    &[bump],
+                ]],
+            ),
+            amount,
+        )?;
+        
+        // Create a record of the unlock
+        emit!(UnlockEvent {
+            vault: vault_key,
+            amount,
+            locked_until,
+            unlock_time: current_time,
+        });
+        
+        vault.locked_amount = 0;
         Ok(())
     }
 
@@ -243,7 +294,7 @@ pub mod voice_ai_launchpad {
                     authority: ctx.accounts.bonding_curve.to_account_info(),
                 },
             ),
-            buy_result.token_amount.try_into()?,
+            buy_result.token_amount,
         )?;
 
         emit!(TradeEvent {
@@ -259,7 +310,7 @@ pub mod voice_ai_launchpad {
 
     // Launch a token with voice verification and optional bonding curve or PumpFun integration
     pub fn launch_token_with_voice(
-        ctx: Context<LaunchTokenWithVoice>,
+        ctx: Context<instructions::voice_launch::LaunchTokenWithVoice>,
         name: String,
         symbol: String,
         uri: String,
@@ -270,30 +321,23 @@ pub mod voice_ai_launchpad {
         launch_type: u8,
     ) -> Result<()> {
         voice_launch::launch_token_with_voice(
-            ctx,
-            name,
-            symbol,
-            uri,
-            deepgram_transcript_id,
-            initial_price,
-            slope,
-            curve_type,
-            launch_type,
+            ctx, name, symbol, uri, deepgram_transcript_id, 
+            initial_price, slope, curve_type, launch_type
         )
     }
-    
+
     // Unlock tokens after market cap target is reached
-    pub fn unlock_market_cap_vesting(ctx: Context<UnlockMarketCapVesting>) -> Result<()> {
+    pub fn unlock_market_cap_vesting(ctx: Context<instructions::voice_launch::UnlockMarketCapVesting>) -> Result<()> {
         voice_launch::unlock_market_cap_vesting(ctx)
     }
-    
+
     // Claim vested tokens after unlock
-    pub fn claim_vested_tokens(ctx: Context<ClaimVestedTokens>) -> Result<()> {
+    pub fn claim_vested_tokens(ctx: Context<instructions::voice_launch::ClaimVestedTokens>) -> Result<()> {
         voice_launch::claim_vested_tokens(ctx)
     }
-    
+
     // Mark a bonding curve as complete and ready for PumpFun
-    pub fn complete_bonding_curve(ctx: Context<CompleteBondingCurve>) -> Result<()> {
+    pub fn complete_bonding_curve(ctx: Context<instructions::voice_launch::CompleteBondingCurve>) -> Result<()> {
         voice_launch::complete_bonding_curve(ctx)
     }
 }
@@ -429,6 +473,19 @@ pub struct UnlockVestedTokens<'info> {
 }
 
 #[derive(Accounts)]
+pub struct UnlockTokens<'info> {
+    #[account(mut, has_one = owner)]
+    pub vault: Account<'info, Vault>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    #[account(mut)]
+    pub vault_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub owner_token_account: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
 pub struct BuyTokens<'info> {
     #[account()]
     pub global: Account<'info, Global>,
@@ -447,26 +504,6 @@ pub struct BuyTokens<'info> {
     pub user_token_account: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct LaunchTokenWithVoice<'info> {
-    // Add accounts and constraints for this instruction
-}
-
-#[derive(Accounts)]
-pub struct UnlockMarketCapVesting<'info> {
-    // Add accounts and constraints for this instruction
-}
-
-#[derive(Accounts)]
-pub struct ClaimVestedTokens<'info> {
-    // Add accounts and constraints for this instruction
-}
-
-#[derive(Accounts)]
-pub struct CompleteBondingCurve<'info> {
-    // Add accounts and constraints for this instruction
 }
 
 // Events
@@ -507,6 +544,14 @@ pub struct VestingTokensLocked {
 }
 
 #[event]
+pub struct UnlockEvent {
+    pub vault: Pubkey,
+    pub amount: u64,
+    pub locked_until: i64,
+    pub unlock_time: i64,
+}
+
+#[event]
 pub struct TokensUnlocked {
     pub vesting: Pubkey,
     pub amount: u64,
@@ -521,6 +566,14 @@ pub struct TradeEvent {
     pub token_amount: u64,
     pub is_buy: bool,
     pub timestamp: i64,
+}
+
+#[event]
+pub struct VestingUnlockEvent {
+    pub vesting: Pubkey,
+    pub amount: u64,
+    pub unlock_time: i64,
+    pub market_cap: u64,
 }
 
 // Errors
@@ -544,6 +597,8 @@ pub enum LaunchpadError {
     CurveComplete,
     #[msg("Slippage tolerance exceeded")]
     SlippageExceeded,
+    #[msg("Lock period not ended")]
+    LockPeriodNotEnded,
 }
 
 // AMM implementation (simplified from original)

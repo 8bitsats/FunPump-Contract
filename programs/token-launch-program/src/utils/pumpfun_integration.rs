@@ -53,14 +53,14 @@ pub fn calculate_current_price(
 // Function to signal to PumpFun that a token is ready
 // This would be called after bonding curve completion to notify PumpFun
 pub fn signal_pumpfun_ready(
-    program_id: &Pubkey, 
-    payer: &AccountInfo,
-    token_mint: &AccountInfo,
-    system_program: &AccountInfo
+    _program_id: &Pubkey, 
+    _payer: &AccountInfo,
+    _token_mint: &AccountInfo,
+    _system_program: &AccountInfo
 ) -> Result<()> {
     // This is a placeholder for the actual PumpFun integration
     // The actual implementation would depend on PumpFun's specific API
-    msg!("Signaling PumpFun that token {token_mint:?} is ready for launch");
+    msg!("Signaling PumpFun that token is ready for launch");
     
     // Actual implementation would involve a CPI call to the PumpFun program
     // with the appropriate instructions and accounts

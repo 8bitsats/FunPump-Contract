@@ -1,0 +1,1 @@
+anchor_lang::context::Context<'_, '_, '_, '_, instructions::voice_launch::LaunchTokenWithVoice<'_>>

@@ -1,0 +1,17 @@
+[package]
+name = "complete-solana-project"
+version = "0.1.0"
+description = "A complete Solana token launchpad with vaults, vesting, and bonding curves"
+edition = "2021"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.28.0"
+anchor-spl = "0.28.0"
+solana-program = "1.16.16"
