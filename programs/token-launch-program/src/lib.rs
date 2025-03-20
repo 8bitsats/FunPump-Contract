@@ -3,6 +3,11 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount};
 use solana_program::clock::UnixTimestamp;
 
+// Import the new modules
+use crate::state::{EnhancedBondingCurve, Vesting};
+use crate::instructions::voice_launch::{self, *};
+use crate::utils::pumpfun_integration::{PUMPFUN_PROGRAM_ID, MPL_TOKEN_METADATA_PROGRAM_ID};
+
 declare_id!("VoiceLaunch11111111111111111111111111111111");
 
 const MINIMUM_VESTING_PERIOD: i64 = 24 * 60 * 60; // 1 day
@@ -251,6 +256,46 @@ pub mod voice_ai_launchpad {
         });
         Ok(())
     }
+
+    // Launch a token with voice verification and optional bonding curve or PumpFun integration
+    pub fn launch_token_with_voice(
+        ctx: Context<LaunchTokenWithVoice>,
+        name: String,
+        symbol: String,
+        uri: String,
+        deepgram_transcript_id: [u8; 64],
+        initial_price: u64,
+        slope: u64,
+        curve_type: u8,
+        launch_type: u8,
+    ) -> Result<()> {
+        voice_launch::launch_token_with_voice(
+            ctx,
+            name,
+            symbol,
+            uri,
+            deepgram_transcript_id,
+            initial_price,
+            slope,
+            curve_type,
+            launch_type,
+        )
+    }
+    
+    // Unlock tokens after market cap target is reached
+    pub fn unlock_market_cap_vesting(ctx: Context<UnlockMarketCapVesting>) -> Result<()> {
+        voice_launch::unlock_market_cap_vesting(ctx)
+    }
+    
+    // Claim vested tokens after unlock
+    pub fn claim_vested_tokens(ctx: Context<ClaimVestedTokens>) -> Result<()> {
+        voice_launch::claim_vested_tokens(ctx)
+    }
+    
+    // Mark a bonding curve as complete and ready for PumpFun
+    pub fn complete_bonding_curve(ctx: Context<CompleteBondingCurve>) -> Result<()> {
+        voice_launch::complete_bonding_curve(ctx)
+    }
 }
 
 // Account structures
@@ -402,6 +447,26 @@ pub struct BuyTokens<'info> {
     pub user_token_account: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct LaunchTokenWithVoice<'info> {
+    // Add accounts and constraints for this instruction
+}
+
+#[derive(Accounts)]
+pub struct UnlockMarketCapVesting<'info> {
+    // Add accounts and constraints for this instruction
+}
+
+#[derive(Accounts)]
+pub struct ClaimVestedTokens<'info> {
+    // Add accounts and constraints for this instruction
+}
+
+#[derive(Accounts)]
+pub struct CompleteBondingCurve<'info> {
+    // Add accounts and constraints for this instruction
 }
 
 // Events
