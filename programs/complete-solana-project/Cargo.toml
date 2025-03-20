@@ -13,6 +13,7 @@ default = []
 anchor-debug = []
 custom-heap = []
 custom-panic = []
+solana = []
 
 [dependencies]
 anchor-lang = "0.28.0"
