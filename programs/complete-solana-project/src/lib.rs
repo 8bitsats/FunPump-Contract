@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount};
 
 // Use a proper base58 program ID (32 bytes)
-declare_id!("CSo12JKLUbvYyXunq3gXQhsqcQAx3eiqGWy4zZX1CnB");
+declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 
 #[program]
 pub mod complete_solana_project {
