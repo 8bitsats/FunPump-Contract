@@ -1,0 +1,25 @@
+{
+  "scripts": {
+    "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
+    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
+    "anchor": "anchor"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "0.29.0",
+    "@project-serum/anchor": "^0.26.0",
+    "@solana/web3.js": "1.78.4",
+    "assert": "*",
+    "bn.js": "*"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.1.1",
+    "@types/chai": "^4.3.5",
+    "@types/mocha": "^10.0.1",
+    "chai": "^4.3.8",
+    "mocha": "^10.2.0",
+    "prettier": "^3.0.2",
+    "ts-mocha": "^10.0.0",
+    "typescript": "^5.2.2"
+  },
+  "packageManager": "yarn@4.4.1+sha512.f825273d0689cc9ead3259c14998037662f1dcd06912637b21a450e8da7cfeb4b1965bbee73d16927baa1201054126bc385c6f43ff4aa705c8631d26e12460f1"
+}
