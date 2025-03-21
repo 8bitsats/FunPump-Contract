@@ -8,7 +8,7 @@ skip-lint = false
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "https://devnet.helius-rpc.com/?api-key=1771237b-e3a5-49cb-b190-af95b2113788"
+cluster = "Devnet"
 wallet = "./funvWGBmpr8N7pTNqpxkWPgWnQbL3Yr5vzCHNJT2YkL.json"
 
 [scripts]
